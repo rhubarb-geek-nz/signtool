@@ -33,11 +33,11 @@ namespace signtool
 {
     class Program
     {
-		readonly string [] args;
+        readonly string [] args;
         readonly Dictionary<string, string> arguments= new Dictionary<string, string>();
         readonly List<string> options = new List<string>();
-        string endpoint = (string)System.AppContext.GetData("endpoint");
-        string authorization = (string)System.AppContext.GetData("authorization");
+        string endpoint = (string)AppContext.GetData("endpoint");
+        string authorization = (string)AppContext.GetData("authorization");
 
         Program(string [] args)
         {
@@ -121,7 +121,7 @@ namespace signtool
                 and = true;
             }
             string url = stringBuilder.ToString();
-            System.Console.WriteLine(url);
+            Console.WriteLine(url);
             var response = await httpClient.PostAsync(url, form);
 
             if (response.IsSuccessStatusCode)
@@ -172,6 +172,7 @@ namespace signtool
                     await response.Content.CopyToAsync(stream);
                 }
             }
+
             return rc;
         }
     }

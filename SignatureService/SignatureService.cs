@@ -50,7 +50,7 @@ namespace SignatureService
 
             logger.LogInformation($"WebRootPath {env.WebRootPath}");
 
-			var signtool = config.GetSection("Signtool");
+            var signtool = config.GetSection("Signtool");
 
             authorization = signtool.GetValue<string>("Authorization");
             realm = signtool.GetValue<string>("Realm");
@@ -58,7 +58,7 @@ namespace SignatureService
 
         public async Task InvokeAsync(HttpContext context)
         {
-			var request = context.Request;
+            var request = context.Request;
 
             string auth = request.Headers.Authorization;
 
@@ -256,5 +256,5 @@ namespace SignatureService
                 Directory.Delete(dir, true);
             }
         }
-	}
+    }
 }
