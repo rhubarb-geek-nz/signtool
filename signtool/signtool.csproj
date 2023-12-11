@@ -8,7 +8,7 @@
     <ToolCommandName>signtool</ToolCommandName>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <PackageId>rhubarb-geek-nz.signtool</PackageId>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <Authors>Roger Brown</Authors>
     <Company>rhubarb-geek-nz</Company>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -44,8 +44,8 @@
   </Target>
 
   <ItemGroup>
-    <RuntimeHostConfigurationOption Include="endpoint" Value="https://localhost:5001/signtool" />
-    <RuntimeHostConfigurationOption Include="authorization" Value="Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==" />
+    <RuntimeHostConfigurationOption Include="configDirectory" Value="rhubarb-geek-nz.signtool" />
+    <RuntimeHostConfigurationOption Include="configFile" Value="signtool.config" />
   </ItemGroup>
 
 </Project>

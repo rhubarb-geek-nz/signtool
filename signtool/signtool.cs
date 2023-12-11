@@ -28,6 +28,7 @@ using System.Net.Mime;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web;
+using System.Xml;
 
 namespace signtool
 {
@@ -36,12 +37,26 @@ namespace signtool
         readonly string [] args;
         readonly Dictionary<string, string> arguments= new Dictionary<string, string>();
         readonly List<string> options = new List<string>();
-        string endpoint = (string)AppContext.GetData("endpoint");
-        string authorization = (string)AppContext.GetData("authorization");
+        readonly string endpoint;
+        readonly string authorization;
 
         Program(string [] args)
         {
             this.args = args;
+
+            string path = String.Join(Path.DirectorySeparatorChar, new string[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                (string)AppContext.GetData("configDirectory"),
+                (string)AppContext.GetData("configFile")
+            });
+
+            XmlDocument doc = new XmlDocument();
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
+            doc.Load(stream);
+
+            endpoint = doc.SelectSingleNode("/SignTool/Endpoint").InnerText;
+            authorization = doc.SelectSingleNode("/SignTool/Authorization").InnerText;
         }
 
         static Task<int> Main(string[] args)
