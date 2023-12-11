@@ -121,7 +121,7 @@ namespace signtool
                 and = true;
             }
             string url = stringBuilder.ToString();
-            Console.WriteLine(url);
+            Console.WriteLine($"{url} {filePath}");
             var response = await httpClient.PostAsync(url, form);
 
             if (response.IsSuccessStatusCode)
