@@ -23,6 +23,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Net.Http.Headers;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -40,7 +41,8 @@ namespace SignatureService
         private readonly IWebHostEnvironment env;
         private readonly IConfiguration config;
         private readonly List<string> validOptions = new List<string>(new string[] { "q", "a"});
-        private readonly string authorization, realm;
+        private readonly string wwwAuthenticate;
+        private readonly List<string> authorization;
 
         public SignatureService(IConfiguration config, IWebHostEnvironment env,ILogger<SignatureService> logger)
         {
@@ -52,8 +54,8 @@ namespace SignatureService
 
             var signtool = config.GetSection("Signtool");
 
-            authorization = signtool.GetValue<string>("Authorization");
-            realm = signtool.GetValue<string>("Realm");
+            authorization = signtool.GetSection(HeaderNames.Authorization).Get<List<string>>();
+            wwwAuthenticate = signtool.GetValue<string>(HeaderNames.WWWAuthenticate);
         }
 
         public async Task InvokeAsync(HttpContext context)
@@ -62,10 +64,10 @@ namespace SignatureService
 
             string auth = request.Headers.Authorization;
 
-            if (!authorization.Equals(auth))
+            if (!authorization.Contains(auth))
             {
                 context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
-	            context.Response.Headers.Add("WWW-Authenticate", $"Basic realm=\"{realm}\"");
+                context.Response.Headers.Add(HeaderNames.WWWAuthenticate, wwwAuthenticate);
                 return;
             }
 
@@ -78,182 +80,203 @@ namespace SignatureService
             try
             {
                 string filename = null;
+                bool bDelete = false;
 
-                if (request.HasFormContentType)
+                try
                 {
-                    IFormCollection form = await request.ReadFormAsync();
-                    IFormFileCollection formFiles = form.Files;
-
-                    foreach (IFormFile formFile in formFiles)
+                    if (request.HasFormContentType)
                     {
-                        filename = formFile.FileName;
+                        IFormCollection form = await request.ReadFormAsync();
+                        IFormFileCollection formFiles = form.Files;
+
+                        foreach (IFormFile formFile in formFiles)
+                        {
+                            if (bDelete)
+                            {
+                                throw new Exception($"{filename} already being processed");
+                            }
+
+                            filename = formFile.FileName;
+
+                            if (filename.Contains("/") || filename.Contains("\\"))
+                            {
+                                throw new ArgumentException(filename, "filename");
+                            }
+
+                            filename = dir + "\\" + filename;
+
+                            using (var file = File.Open(filename, FileMode.Create))
+                            {
+                                bDelete = true;
+
+                                await formFile.CopyToAsync(file);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (!System.Net.Mime.MediaTypeNames.Application.Octet.Equals(request.ContentType))
+                        {
+                            throw new Exception($"{request.ContentType} should be {MediaTypeNames.Application.Octet}");
+                        }
+
+                        ContentDisposition contentDisposition = new ContentDisposition(request.Headers.ContentDisposition);
+
+                        filename = contentDisposition.FileName;
 
                         if (filename.Contains("/") || filename.Contains("\\"))
                         {
                             throw new ArgumentException(filename, "filename");
                         }
 
-                        filename = dir + "\\" + filename;
+                        filename = dir + System.IO.Path.DirectorySeparatorChar + filename;
 
                         using (var file = File.Open(filename, FileMode.Create))
                         {
-                            await formFile.CopyToAsync(file);
+                            bDelete = true;
+
+                            await request.Body.CopyToAsync(file);
                         }
                     }
-                }
-                else
-                {
-                    if (!System.Net.Mime.MediaTypeNames.Application.Octet.Equals(request.ContentType))
+
+                    StringBuilder stringBuilder = new StringBuilder();
+
+                    string command = request.Query["command"];
+
+                    stringBuilder.Append(command);
+                    stringBuilder.Append(" ");
+
+                    if (request.Query.TryGetValue("options", out var options))
                     {
-                        throw new Exception($"{request.ContentType} should be {MediaTypeNames.Application.Octet}");
-                    }
-
-                    ContentDisposition contentDisposition = new ContentDisposition(request.Headers.ContentDisposition);
-
-                    filename = contentDisposition.FileName;
-
-                    if (filename.Contains("/") || filename.Contains("\\"))
-                    {
-                        throw new ArgumentException(filename, "filename");
-                    }
-
-                    filename = dir + System.IO.Path.DirectorySeparatorChar + filename;
-
-                    using (var file = File.Open(filename, FileMode.Create))
-                    {
-                        await request.Body.CopyToAsync(file);
-                    }
-                }
-
-                StringBuilder stringBuilder = new StringBuilder();
-
-                string command = request.Query["command"];
-
-                stringBuilder.Append(command);
-                stringBuilder.Append(" ");
-
-                if (request.Query.TryGetValue("options", out var options))
-                {
-                    foreach (var optionHeader in options)
-                    {
-                        foreach (var opt in optionHeader.Split(","))
+                        foreach (var optionHeader in options)
                         {
-                            if (!validOptions.Contains(opt))
+                            foreach (var opt in optionHeader.Split(","))
                             {
-                                throw new Exception($"invalid option {opt}");
-                            }
+                                if (!validOptions.Contains(opt))
+                                {
+                                    throw new Exception($"invalid option {opt}");
+                                }
 
-                            stringBuilder.Append("/");
-                            stringBuilder.Append(opt);
-                            stringBuilder.Append(" ");
+                                stringBuilder.Append("/");
+                                stringBuilder.Append(opt);
+                                stringBuilder.Append(" ");
+                            }
                         }
                     }
-                }
 
-                foreach (string argName in new string[] { "td", "sha1", "fd", "t", "tr"})
-                {
-                    if (request.Query.TryGetValue(argName, out var args))
+                    foreach (string argName in new string[] { "td", "sha1", "fd", "t", "tr" })
                     {
-                        foreach (var arg in args)
+                        if (request.Query.TryGetValue(argName, out var args))
                         {
-                            if (arg.Contains(" ")||arg.Contains("\\") || arg.Contains("\"") || arg.Contains("\'"))
+                            foreach (var arg in args)
                             {
-                                throw new Exception($"invalid argument {arg}");
-                            }
-
-                            foreach (char c in arg.ToCharArray())
-                            {
-                                if (c < ' ')
+                                if (arg.Contains(" ") || arg.Contains("\\") || arg.Contains("\"") || arg.Contains("\'"))
                                 {
                                     throw new Exception($"invalid argument {arg}");
                                 }
-                            }
 
-                            if (argName.Equals("sha1"))
-                            {
-                                Convert.FromHexString(arg);
-                            }
+                                foreach (char c in arg.ToCharArray())
+                                {
+                                    if (c < ' ')
+                                    {
+                                        throw new Exception($"invalid argument {arg}");
+                                    }
+                                }
 
-                            if (argName.Equals("t")||argName.Equals("tr"))
-                            {
-                                new Uri(arg);
-                            }
+                                if (argName.Equals("sha1"))
+                                {
+                                    Convert.FromHexString(arg);
+                                }
 
-                            stringBuilder.Append("/");
-                            stringBuilder.Append(argName);
-                            stringBuilder.Append(" ");
-                            stringBuilder.Append(arg);
-                            stringBuilder.Append(" ");
+                                if (argName.Equals("t") || argName.Equals("tr"))
+                                {
+                                    new Uri(arg);
+                                }
+
+                                stringBuilder.Append("/");
+                                stringBuilder.Append(argName);
+                                stringBuilder.Append(" ");
+                                stringBuilder.Append(arg);
+                                stringBuilder.Append(" ");
+                            }
                         }
                     }
-                }
 
-                stringBuilder.Append("\"");
-                stringBuilder.Append(filename);
-                stringBuilder.Append("\"");
+                    stringBuilder.Append("\"");
+                    stringBuilder.Append(filename);
+                    stringBuilder.Append("\"");
 
-                ProcessStartInfo startInfo = new()
-                {
-                    FileName = "signtool.exe",
-                    Arguments = stringBuilder.ToString(),
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                };
-
-                logger.LogInformation($"{startInfo.FileName} {startInfo.Arguments}");
-
-                var proc = Process.Start(startInfo);
-
-                ArgumentNullException.ThrowIfNull(proc);
-
-                await proc.WaitForExitAsync();
-
-                string output = await proc.StandardOutput.ReadToEndAsync();
-                string error = await proc.StandardError.ReadToEndAsync();
-
-                if (output.Length > 0)
-                {
-                    logger.LogInformation(output);
-                }
-
-                if (error.Length > 0)
-                {
-                    logger.LogInformation(error);
-                }
-
-                int exitCode = proc.ExitCode;
-
-                var response = context.Response;
-
-                response.StatusCode = exitCode == 0 ? 200 : 500;
-
-                if (exitCode == 0 && String.Equals(command, "sign", StringComparison.OrdinalIgnoreCase))
-                {
-                    response.ContentType = MediaTypeNames.Application.Octet;
-
-                    ContentDisposition contentDisposition = new ContentDisposition("attachment");
-
-                    contentDisposition.FileName = Path.GetFileName(filename);
-
-                    response.Headers.ContentDisposition = contentDisposition.ToString();
-
-                    using (var outfile = File.Open(filename, FileMode.Open))
+                    ProcessStartInfo startInfo = new()
                     {
-                        await outfile.CopyToAsync(response.Body);
-                    }
-                }
-                else
-                {
-                    response.ContentType = "text/plain";
+                        FileName = "signtool.exe",
+                        Arguments = stringBuilder.ToString(),
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                    };
 
-                    await response.Body.WriteAsync(Encoding.ASCII.GetBytes(output));
-                    await response.Body.WriteAsync(Encoding.ASCII.GetBytes(error));
+                    logger.LogInformation($"{startInfo.FileName} {startInfo.Arguments}");
+
+                    var proc = Process.Start(startInfo);
+
+                    ArgumentNullException.ThrowIfNull(proc);
+
+                    await proc.WaitForExitAsync();
+
+                    string output = await proc.StandardOutput.ReadToEndAsync();
+                    string error = await proc.StandardError.ReadToEndAsync();
+
+                    if (output.Length > 0)
+                    {
+                        logger.LogInformation(output);
+                    }
+
+                    if (error.Length > 0)
+                    {
+                        logger.LogInformation(error);
+                    }
+
+                    int exitCode = proc.ExitCode;
+
+                    var response = context.Response;
+
+                    response.StatusCode = exitCode == 0 ? 200 : 500;
+
+                    if (exitCode == 0 && String.Equals(command, "sign", StringComparison.OrdinalIgnoreCase))
+                    {
+                        response.ContentType = MediaTypeNames.Application.Octet;
+
+                        ContentDisposition contentDisposition = new ContentDisposition("attachment");
+
+                        contentDisposition.FileName = Path.GetFileName(filename);
+
+                        response.Headers.ContentDisposition = contentDisposition.ToString();
+
+                        using (var outfile = File.Open(filename, FileMode.Open))
+                        {
+                            await outfile.CopyToAsync(response.Body);
+                        }
+                    }
+                    else
+                    {
+                        response.ContentType = "text/plain";
+
+                        await response.Body.WriteAsync(Encoding.ASCII.GetBytes(output));
+                        await response.Body.WriteAsync(Encoding.ASCII.GetBytes(error));
+                    }
+
+                }
+                finally
+                {
+                    if (bDelete)
+                    {
+                        File.Delete(filename);
+                    }
                 }
             }
             finally
             {
-                Directory.Delete(dir, true);
+                Directory.Delete(dir, false);
             }
         }
     }

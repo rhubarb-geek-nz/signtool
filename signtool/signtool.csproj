@@ -6,7 +6,6 @@
     <TargetFrameworks>net6.0;net7.0;net8.0</TargetFrameworks>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>signtool</ToolCommandName>
-    <PackageOutputPath>./nupkg</PackageOutputPath>
     <PackageId>rhubarb-geek-nz.signtool</PackageId>
     <Version>1.0.3</Version>
     <Authors>Roger Brown</Authors>
@@ -24,7 +23,7 @@
     </None>
   </ItemGroup>
 
-  <Target Name="Sign" AfterTargets="Compile" Condition=" '$(Configuration)' == 'Release' AND '$(OS)' == 'Windows_NT' ">
+  <Target Name="SignWindows" AfterTargets="Compile" Condition=" '$(Configuration)' == 'Release' AND '$(OS)' == 'Windows_NT' ">
     <ItemGroup>
         <FileToSign Include="$(IntermediateOutputPath)$(TargetFileName)" />
     </ItemGroup>
@@ -36,7 +35,7 @@
     />
   </Target>
 
-  <Target Name="Sign" AfterTargets="Compile" Condition=" '$(Configuration)' == 'Release' AND '$(OS)' != 'Windows_NT' ">
+  <Target Name="SignOthers" AfterTargets="Compile" Condition=" '$(Configuration)' == 'Release' AND '$(OS)' != 'Windows_NT' ">
     <Exec Command="dotnet tool restore" />
     <ItemGroup>
         <FileToSign Include="$(IntermediateOutputPath)$(TargetFileName)" />
