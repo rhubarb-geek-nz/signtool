@@ -67,13 +67,13 @@ namespace SignatureService
             if (!authorization.Contains(auth))
             {
                 context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                context.Response.Headers.Add(HeaderNames.WWWAuthenticate, wwwAuthenticate);
+                context.Response.Headers.WWWAuthenticate = wwwAuthenticate;
                 return;
             }
 
             string guid = Guid.NewGuid().ToString();
 
-            string dir = env.WebRootPath + "\\" + guid;
+            string dir = env.WebRootPath + System.IO.Path.DirectorySeparatorChar + guid;
 
             Directory.CreateDirectory(dir);
 
@@ -103,7 +103,7 @@ namespace SignatureService
                                 throw new ArgumentException(filename, "filename");
                             }
 
-                            filename = dir + "\\" + filename;
+                            filename = dir + System.IO.Path.DirectorySeparatorChar + filename;
 
                             using (var file = File.Open(filename, FileMode.Create))
                             {
