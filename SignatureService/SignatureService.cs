@@ -35,16 +35,16 @@ using System.Threading.Tasks;
 
 namespace SignatureService
 {
-	internal class SignatureService
-	{
+    internal class SignatureService
+    {
         private readonly ILogger<SignatureService> logger;
         private readonly IWebHostEnvironment env;
         private readonly IConfiguration config;
-        private readonly List<string> validOptions = new List<string>(new string[] { "q", "a"});
+        private readonly List<string> validOptions = new List<string>(new string[] { "q", "a" });
         private readonly string wwwAuthenticate;
         private readonly List<string> authorization;
 
-        public SignatureService(IConfiguration config, IWebHostEnvironment env,ILogger<SignatureService> logger)
+        public SignatureService(IConfiguration config, IWebHostEnvironment env, ILogger<SignatureService> logger)
         {
             this.env = env;
             this.logger = logger;
@@ -73,7 +73,7 @@ namespace SignatureService
 
             string guid = Guid.NewGuid().ToString();
 
-            string dir = env.WebRootPath + System.IO.Path.DirectorySeparatorChar + guid;
+            string dir = Path.Combine(env.WebRootPath, guid);
 
             Directory.CreateDirectory(dir);
 
@@ -103,7 +103,7 @@ namespace SignatureService
                                 throw new ArgumentException(filename, "filename");
                             }
 
-                            filename = dir + System.IO.Path.DirectorySeparatorChar + filename;
+                            filename = Path.Combine(dir, filename);
 
                             using (var file = File.Open(filename, FileMode.Create))
                             {
@@ -129,7 +129,7 @@ namespace SignatureService
                             throw new ArgumentException(filename, "filename");
                         }
 
-                        filename = dir + System.IO.Path.DirectorySeparatorChar + filename;
+                        filename = Path.Combine(dir, filename);
 
                         using (var file = File.Open(filename, FileMode.Create))
                         {
