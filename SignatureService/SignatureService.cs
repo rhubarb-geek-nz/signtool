@@ -13,6 +13,7 @@ using System.Linq;
 using System.Management.Automation;
 using System.Net;
 using System.Net.Mime;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -199,11 +200,7 @@ namespace SignatureService
 
                                                 if (propertyInfo.Value is X509Certificate2 certificate)
                                                 {
-#if NET7_0_OR_GREATER
-                                                    value = certificate.ExportCertificatePem();
-#else
-                                                    value = certificate.Thumbprint;
-#endif
+                                                    value = ExportCertificatePem(certificate);
                                                 }
                                                 else
                                                 {
@@ -215,9 +212,14 @@ namespace SignatureService
                                                     {
                                                         if (propertyInfo.Value is string str)
                                                         {
-                                                            if (str.Equals(filePath) || "Path".Equals(propertyInfo.Name))
+                                                            switch (propertyInfo.Name)
                                                             {
-                                                                str = fileName;
+                                                                case "Path":
+                                                                    str = fileName;
+                                                                    break;
+                                                                case "StatusMessage":
+                                                                    str = str.Replace(filePath, fileName);
+                                                                    break;
                                                             }
 
                                                             value = str;
@@ -251,7 +253,11 @@ namespace SignatureService
 
                                 response.ContentType = MediaTypeNames.Application.Json;
 
-                                await response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(body)));
+                                string json = JsonSerializer.Serialize(body);
+
+                                logger.LogInformation($"{CMD_GetAuthenticodeSignature} {json}");
+
+                                await response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(json));
                             }
                             break;
                         default:
@@ -271,6 +277,17 @@ namespace SignatureService
             {
                 Directory.Delete(dir, false);
             }
+        }
+
+        private string ExportCertificatePem(X509Certificate2 cert)
+        {
+#if NET7_0_OR_GREATER
+            return cert.ExportCertificatePem();
+#else
+            byte[] certificateBytes = cert.RawData;
+            char[] certificatePem = PemEncoding.Write("CERTIFICATE", certificateBytes);
+            return new string(certificatePem);
+#endif
         }
     }
 }
