@@ -13,7 +13,10 @@ using System.Linq;
 using System.Management.Automation;
 using System.Net;
 using System.Net.Mime;
+#if NET7_0_OR_GREATER
+#else
 using System.Security.Cryptography;
+#endif
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -254,8 +257,6 @@ namespace SignatureService
                                 response.ContentType = MediaTypeNames.Application.Json;
 
                                 string json = JsonSerializer.Serialize(body);
-
-                                logger.LogInformation($"{CMD_GetAuthenticodeSignature} {json}");
 
                                 await response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(json));
                             }
