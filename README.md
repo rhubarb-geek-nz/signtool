@@ -8,7 +8,7 @@ This projects contains
 
 The idea is that a program runs on the build machine that takes the same arguments as the original `signtool.exe`.
 
-This forwards the request to a `REST` service which then runs the original `signtool.exe`.
+This forwards the request to a `REST` service which then runs the PowerShell cmdlet [Set-AuthenticodeSignature](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-authenticodesignature).
 
 The effect is that a `dotnet` build can sign dlls using the appropriate mechanisms.
 

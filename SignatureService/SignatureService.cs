@@ -1,23 +1,5 @@
-/**************************************************************************
- *
- *  Copyright 2022, Roger Brown
- *
- *  This file is part of Roger Brown's Toolkit.
- *
- *  This program is free software: you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the
- *  Free Software Foundation, either version 3 of the License, or (at your
- *  option) any later version.
- * 
- *  This program is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- *  more details.
- *
- *  You should have received a copy of the GNU Lesser General Public License
- *  along with this program.  If not, see <http://www.gnu.org/licenses/>
- *
- */
+// Copyright (c) 2024 Roger Brown.
+// Licensed under the MIT License.
 
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -26,11 +8,13 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Net.Http.Headers;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Management.Automation;
 using System.Net;
 using System.Net.Mime;
-using System.Text;
+using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace SignatureService
@@ -40,9 +24,16 @@ namespace SignatureService
         private readonly ILogger<SignatureService> logger;
         private readonly IWebHostEnvironment env;
         private readonly IConfiguration config;
-        private readonly List<string> validOptions = new List<string>(new string[] { "q", "a" });
         private readonly string wwwAuthenticate;
         private readonly List<string> authorization;
+        private readonly static string
+            CMD_SetAuthenticodeSignature = "Set-AuthenticodeSignature",
+            CMD_GetAuthenticodeSignature = "Get-AuthenticodeSignature";
+        private readonly static string
+            ARG_Certificate = "Certificate",
+            ARG_TimestampServer = "TimestampServer",
+            ARG_HashAlgorithm = "HashAlgorithm",
+            ARG_FilePath = "FilePath";
 
         public SignatureService(IConfiguration config, IWebHostEnvironment env, ILogger<SignatureService> logger)
         {
@@ -79,7 +70,7 @@ namespace SignatureService
 
             try
             {
-                string filename = null;
+                string fileName = null, filePath = null;
                 bool bDelete = false;
 
                 try
@@ -93,19 +84,19 @@ namespace SignatureService
                         {
                             if (bDelete)
                             {
-                                throw new Exception($"{filename} already being processed");
+                                throw new Exception($"{fileName} already being processed");
                             }
 
-                            filename = formFile.FileName;
+                            fileName = formFile.FileName;
 
-                            if (filename.Contains("/") || filename.Contains("\\"))
+                            if (fileName.Contains("/") || fileName.Contains("\\"))
                             {
-                                throw new ArgumentException(filename, "filename");
+                                throw new ArgumentException(fileName, "fileName");
                             }
 
-                            filename = Path.Combine(dir, filename);
+                            filePath = Path.Combine(dir, fileName);
 
-                            using (var file = File.Open(filename, FileMode.Create))
+                            using (var file = File.Open(filePath, FileMode.Create))
                             {
                                 bDelete = true;
 
@@ -120,18 +111,16 @@ namespace SignatureService
                             throw new Exception($"{request.ContentType} should be {MediaTypeNames.Application.Octet}");
                         }
 
-                        ContentDisposition contentDisposition = new ContentDisposition(request.Headers.ContentDisposition);
+                        fileName = new ContentDisposition(request.Headers.ContentDisposition).FileName;
 
-                        filename = contentDisposition.FileName;
-
-                        if (filename.Contains("/") || filename.Contains("\\"))
+                        if (fileName.Contains("/") || fileName.Contains("\\"))
                         {
-                            throw new ArgumentException(filename, "filename");
+                            throw new ArgumentException(fileName, "fileName");
                         }
 
-                        filename = Path.Combine(dir, filename);
+                        filePath = Path.Combine(dir, fileName);
 
-                        using (var file = File.Open(filename, FileMode.Create))
+                        using (var file = File.Open(filePath, FileMode.Create))
                         {
                             bDelete = true;
 
@@ -139,130 +128,134 @@ namespace SignatureService
                         }
                     }
 
-                    StringBuilder stringBuilder = new StringBuilder();
-
                     string command = request.Query["command"];
 
-                    stringBuilder.Append(command);
-                    stringBuilder.Append(" ");
-
-                    if (request.Query.TryGetValue("options", out var options))
+                    switch (command)
                     {
-                        foreach (var optionHeader in options)
-                        {
-                            foreach (var opt in optionHeader.Split(","))
+                        case "sign":
                             {
-                                if (!validOptions.Contains(opt))
+                                string sha1 = request.Query["sha1"];
+                                string fd = request.Query["fd"];
+                                string t = request.Query["t"];
+
+                                X509Store keyStore = new X509Store(StoreName.My, StoreLocation.CurrentUser);
+                                keyStore.Open(OpenFlags.ReadOnly);
+
+                                X509Certificate2 cert = keyStore.Certificates.Find(X509FindType.FindByThumbprint, sha1, true).Single();
+
+                                logger.LogInformation($"{CMD_SetAuthenticodeSignature} -{ARG_Certificate} {cert.Thumbprint} -{ARG_TimestampServer} {t} -{ARG_HashAlgorithm} {fd} -{ARG_FilePath} {filePath}");
+
+                                using (PowerShell powerShell = PowerShell.Create())
                                 {
-                                    throw new Exception($"invalid option {opt}");
+                                    powerShell
+                                        .AddCommand(CMD_SetAuthenticodeSignature)
+                                        .AddParameter(ARG_Certificate, cert)
+                                        .AddParameter(ARG_TimestampServer, t)
+                                        .AddParameter(ARG_HashAlgorithm, fd)
+                                        .AddParameter(ARG_FilePath, filePath);
+
+                                    await powerShell.InvokeAsync();
                                 }
 
-                                stringBuilder.Append("/");
-                                stringBuilder.Append(opt);
-                                stringBuilder.Append(" ");
+                                var response = context.Response;
+
+                                response.StatusCode = 200;
+
+                                response.ContentType = MediaTypeNames.Application.Octet;
+
+                                ContentDisposition contentDisposition = new ContentDisposition("attachment");
+
+                                contentDisposition.FileName = Path.GetFileName(filePath);
+
+                                response.Headers.ContentDisposition = contentDisposition.ToString();
+
+                                using (var outfile = File.Open(filePath, FileMode.Open))
+                                {
+                                    await outfile.CopyToAsync(response.Body);
+                                }
                             }
-                        }
-                    }
-
-                    foreach (string argName in new string[] { "td", "sha1", "fd", "t", "tr" })
-                    {
-                        if (request.Query.TryGetValue(argName, out var args))
-                        {
-                            foreach (var arg in args)
+                            break;
+                        case "verify":
                             {
-                                if (arg.Contains(" ") || arg.Contains("\\") || arg.Contains("\"") || arg.Contains("\'"))
-                                {
-                                    throw new Exception($"invalid argument {arg}");
-                                }
+                                logger.LogInformation($"{CMD_GetAuthenticodeSignature} -{ARG_FilePath} {filePath}");
 
-                                foreach (char c in arg.ToCharArray())
+                                Dictionary<string, object> body = new Dictionary<string, object>();
+
+                                using (PowerShell powerShell = PowerShell.Create())
                                 {
-                                    if (c < ' ')
+                                    powerShell
+                                        .AddCommand(CMD_GetAuthenticodeSignature)
+                                        .AddParameter(ARG_FilePath, filePath);
+
+                                    var result = await powerShell.InvokeAsync();
+
+                                    foreach (PSObject item in result)
                                     {
-                                        throw new Exception($"invalid argument {arg}");
+                                        foreach (var propertyInfo in item.Properties)
+                                        {
+                                            if (propertyInfo.Value != null)
+                                            {
+                                                object value;
+
+                                                if (propertyInfo.Value is X509Certificate2 certificate)
+                                                {
+#if NET7_0_OR_GREATER
+                                                    value = certificate.ExportCertificatePem();
+#else
+                                                    value = certificate.Thumbprint;
+#endif
+                                                }
+                                                else
+                                                {
+                                                    if (propertyInfo.Value.GetType().IsEnum)
+                                                    {
+                                                        value = propertyInfo.Value.ToString();
+                                                    }
+                                                    else
+                                                    {
+                                                        if (propertyInfo.Value is string str)
+                                                        {
+                                                            if (str.Equals(filePath) || "Path".Equals(propertyInfo.Name))
+                                                            {
+                                                                str = fileName;
+                                                            }
+
+                                                            value = str;
+                                                        }
+                                                        else
+                                                        {
+                                                            if (propertyInfo.Value is bool)
+                                                            {
+                                                                value = propertyInfo.Value;
+                                                            }
+                                                            else
+                                                            {
+                                                                value = null;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                if (value != null)
+                                                {
+                                                    body.Add(propertyInfo.Name, value);
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
-                                if (argName.Equals("sha1"))
-                                {
-                                    Convert.FromHexString(arg);
-                                }
+                                var response = context.Response;
 
-                                if (argName.Equals("t") || argName.Equals("tr"))
-                                {
-                                    new Uri(arg);
-                                }
+                                response.StatusCode = 200;
 
-                                stringBuilder.Append("/");
-                                stringBuilder.Append(argName);
-                                stringBuilder.Append(" ");
-                                stringBuilder.Append(arg);
-                                stringBuilder.Append(" ");
+                                response.ContentType = MediaTypeNames.Application.Json;
+
+                                await response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(body)));
                             }
-                        }
-                    }
-
-                    stringBuilder.Append("\"");
-                    stringBuilder.Append(filename);
-                    stringBuilder.Append("\"");
-
-                    ProcessStartInfo startInfo = new()
-                    {
-                        FileName = "signtool.exe",
-                        Arguments = stringBuilder.ToString(),
-                        CreateNoWindow = true,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                    };
-
-                    logger.LogInformation($"{startInfo.FileName} {startInfo.Arguments}");
-
-                    var proc = Process.Start(startInfo);
-
-                    ArgumentNullException.ThrowIfNull(proc);
-
-                    await proc.WaitForExitAsync();
-
-                    string output = await proc.StandardOutput.ReadToEndAsync();
-                    string error = await proc.StandardError.ReadToEndAsync();
-
-                    if (output.Length > 0)
-                    {
-                        logger.LogInformation(output);
-                    }
-
-                    if (error.Length > 0)
-                    {
-                        logger.LogInformation(error);
-                    }
-
-                    int exitCode = proc.ExitCode;
-
-                    var response = context.Response;
-
-                    response.StatusCode = exitCode == 0 ? 200 : 500;
-
-                    if (exitCode == 0 && String.Equals(command, "sign", StringComparison.OrdinalIgnoreCase))
-                    {
-                        response.ContentType = MediaTypeNames.Application.Octet;
-
-                        ContentDisposition contentDisposition = new ContentDisposition("attachment");
-
-                        contentDisposition.FileName = Path.GetFileName(filename);
-
-                        response.Headers.ContentDisposition = contentDisposition.ToString();
-
-                        using (var outfile = File.Open(filename, FileMode.Open))
-                        {
-                            await outfile.CopyToAsync(response.Body);
-                        }
-                    }
-                    else
-                    {
-                        response.ContentType = "text/plain";
-
-                        await response.Body.WriteAsync(Encoding.ASCII.GetBytes(output));
-                        await response.Body.WriteAsync(Encoding.ASCII.GetBytes(error));
+                            break;
+                        default:
+                            throw new ArgumentException(command, "command");
                     }
 
                 }
@@ -270,7 +263,7 @@ namespace SignatureService
                 {
                     if (bDelete)
                     {
-                        File.Delete(filename);
+                        File.Delete(filePath);
                     }
                 }
             }

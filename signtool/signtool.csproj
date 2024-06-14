@@ -7,7 +7,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>signtool</ToolCommandName>
     <PackageId>rhubarb-geek-nz.signtool</PackageId>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <Authors>Roger Brown</Authors>
     <Company>rhubarb-geek-nz</Company>
     <PackageReadmeFile>README.md</PackageReadmeFile>
