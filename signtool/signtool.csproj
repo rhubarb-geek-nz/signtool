@@ -3,7 +3,7 @@
   <PropertyGroup>
     <AssemblyName>signtool</AssemblyName>
     <OutputType>Exe</OutputType>
-    <TargetFrameworks>net6.0;net7.0;net8.0</TargetFrameworks>
+    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>signtool</ToolCommandName>
     <PackageId>rhubarb-geek-nz.signtool</PackageId>
